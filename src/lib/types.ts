@@ -146,15 +146,17 @@ export interface GastoCategoria {
 export interface Gasto {
   id: number;
   fecha: string;
-  categoria_id: number;
+  categoria?: string;
+  categoria_id?: number;
   concepto: string;
   monto: number;
-  metodo_pago: string;
+  metodo_pago?: string;
   comprobante_url?: string;
+  comprobante_ref?: string;
   usuario_id?: number;
   notas?: string;
   created_at?: string;
-  // Joins
+  // Joins y visualización
   categoria_nombre?: string;
   usuario_nombre?: string;
 }

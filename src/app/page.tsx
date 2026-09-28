@@ -14,26 +14,32 @@ import {
   ArrowUpRight, 
   ArrowDownLeft, 
   Boxes, 
-  AlertCircle,
   RefreshCw,
   Eye,
   CheckCircle2,
   Calendar,
   Sparkles,
-  ChevronRight
+  ChevronRight,
+  X,
+  CreditCard,
+  Trash2
 } from 'lucide-react';
 
 export default function Home() {
-  const { usuarioActual, isAdmin, isSupervisor } = useAuth();
+  const { usuarioActual, isAdmin } = useAuth();
   const [cargando, setCargando] = useState(true);
 
   // Estados de datos
   const [saldosEmpaque, setSaldosEmpaque] = useState<SaldoEmpaque[]>([]);
   const [ultimasCompras, setUltimasCompras] = useState<Compra[]>([]);
   const [ultimasVentas, setUltimasVentas] = useState<Venta[]>([]);
+  const [gastosList, setGastosList] = useState<Gasto[]>([]);
   const [gastosHoy, setGastosHoy] = useState<number>(0);
   const [comprasHoyTotal, setComprasHoyTotal] = useState<number>(0);
   const [ventasHoyTotal, setVentasHoyTotal] = useState<number>(0);
+
+  // Modal para ver detalle rápido de gastos
+  const [modalDetalleGastos, setModalDetalleGastos] = useState(false);
 
   const cargarDatos = async () => {
     setCargando(true);
@@ -82,22 +88,34 @@ export default function Home() {
         );
       }
 
-      // 4. Totales del día / acumulados si es admin
+      // 4. Totales de Ventas
       const { data: vTotal } = await supabase.from('ventas').select('total');
       if (vTotal) {
         const sumV = vTotal.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
         setVentasHoyTotal(sumV);
       }
 
+      // 5. Totales de Compras
       const { data: cTotal } = await supabase.from('compras').select('total');
       if (cTotal) {
         const sumC = cTotal.reduce((acc, curr) => acc + (Number(curr.total) || 0), 0);
         setComprasHoyTotal(sumC);
       }
 
-      const { data: gTotal } = await supabase.from('gastos').select('monto');
-      if (gTotal) {
-        const sumG = gTotal.reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
+      // 6. Gastos Operativos y Detalle
+      const { data: gData } = await supabase
+        .from('gastos')
+        .select('*')
+        .order('fecha', { ascending: false });
+
+      if (gData) {
+        setGastosList(
+          gData.map((g) => ({
+            ...g,
+            categoria: g.categoria || 'Gasto General',
+          }))
+        );
+        const sumG = gData.reduce((acc, curr) => acc + (Number(curr.monto) || 0), 0);
         setGastosHoy(sumG);
       }
     } catch (err) {
@@ -266,14 +284,31 @@ export default function Home() {
               </p>
             </div>
 
-            {/* Gastos Operativos */}
-            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
-              <span className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
-                <Receipt className="w-3.5 h-3.5 text-rose-600" /> Gastos Operativos
-              </span>
-              <p className="text-lg font-black text-slate-900 mt-1">
-                ${gastosHoy.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-              </p>
+            {/* GASTOS OPERATIVOS CON BOTÓN "VER DETALLE" */}
+            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
+                    <Receipt className="w-3.5 h-3.5 text-rose-600" /> Gastos Operativos
+                  </span>
+                  <button
+                    onClick={() => setModalDetalleGastos(true)}
+                    className="text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-0.5 rounded-lg transition active:scale-95 flex items-center gap-0.5"
+                  >
+                    Ver detalle
+                  </button>
+                </div>
+                <p className="text-lg font-black text-slate-900 mt-1">
+                  ${gastosHoy.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+
+              <Link
+                href="/gastos"
+                className="mt-2 text-[10px] font-semibold text-rose-600 hover:text-rose-700 flex items-center gap-0.5 pt-1.5 border-t border-slate-100"
+              >
+                Ir al módulo completo &rarr;
+              </Link>
             </div>
 
             {/* Utilidad Bruta Estimada */}
@@ -349,7 +384,7 @@ export default function Home() {
         )}
       </div>
 
-      {/* ACTIVIDAD RECIENTE (ÚLTIMAS COMPRAS / VENTAS) */}
+      {/* ACTIVIDAD RECIENTE (ÚLTIMAS COMPRAS / VENTAS / GASTOS) */}
       <div className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-500 px-1">
           Últimos Movimientos
@@ -433,6 +468,78 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {/* MODAL DETALLE DE GASTOS OPERATIVOS ($7,700) */}
+      {modalDetalleGastos && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 shadow-2xl max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-rose-100 text-rose-700 rounded-xl">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Detalle de Gastos Operativos</h3>
+                  <p className="text-[11px] text-slate-500">Desglose de los ${gastosHoy.toLocaleString('es-MX', { minimumFractionDigits: 2 })} MXN</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setModalDetalleGastos(false)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-3 divide-y divide-slate-100">
+              {gastosList.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">No hay gastos registrados en la base de datos.</p>
+              ) : (
+                gastosList.map((g) => (
+                  <div key={g.id} className="py-3 flex items-start justify-between gap-3 text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                        {g.categoria}
+                      </span>
+                      <p className="font-bold text-slate-900 mt-1">{g.concepto}</p>
+                      <p className="text-[11px] text-slate-400">
+                        Método: {g.metodo_pago || 'Efectivo'} · Fecha:{' '}
+                        {new Date(g.fecha).toLocaleDateString('es-MX', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric',
+                        })}
+                      </p>
+                      {g.comprobante_ref && (
+                        <p className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                          Referencia: {g.comprobante_ref}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-sm font-black text-rose-600 block">
+                        -${Number(g.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                      </span>
+                      <span className="text-[10px] text-slate-400">MXN</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 mt-3 space-y-2">
+              <Link
+                href="/gastos"
+                onClick={() => setModalDetalleGastos(false)}
+                className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm flex items-center justify-center gap-1.5 text-center"
+              >
+                <Receipt className="w-4 h-4" /> Administrar o Registrar Más Gastos
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
