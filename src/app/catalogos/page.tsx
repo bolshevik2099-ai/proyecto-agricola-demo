@@ -15,7 +15,11 @@ import {
   CheckCircle2, 
   X,
   Search,
-  Edit2
+  Edit2,
+  Trash2,
+  MapPin,
+  Phone,
+  User
 } from 'lucide-react';
 
 type TabTipo = 'productos' | 'empaques' | 'clientes' | 'proveedores';
@@ -25,6 +29,7 @@ export default function CatalogosPage() {
   const [tabActiva, setTabActiva] = useState<TabTipo>('productos');
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
 
   // Datos
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -37,6 +42,12 @@ export default function CatalogosPage() {
   const [modalEmpaque, setModalEmpaque] = useState(false);
   const [modalCliente, setModalCliente] = useState(false);
   const [modalProveedor, setModalProveedor] = useState(false);
+
+  // Estados de edición (null = creando nuevo, obj = editando)
+  const [productoAEditar, setProductoAEditar] = useState<Producto | null>(null);
+  const [empaqueAEditar, setEmpaqueAEditar] = useState<EmpaqueTipo | null>(null);
+  const [clienteAEditar, setClienteAEditar] = useState<Cliente | null>(null);
+  const [proveedorAEditar, setProveedorAEditar] = useState<Proveedor | null>(null);
 
   // Form Producto
   const [pNombre, setPNombre] = useState('');
@@ -56,7 +67,7 @@ export default function CatalogosPage() {
   const [cTelefono, setCTelefono] = useState('');
   const [cCiudad, setCCiudad] = useState('Zamora');
 
-  // Form Proveedor
+  // Form Proveedor / Huerta
   const [prNombre, setPrNombre] = useState('');
   const [prContacto, setPrContacto] = useState('');
   const [prTelefono, setPrTelefono] = useState('');
@@ -88,24 +99,57 @@ export default function CatalogosPage() {
     cargarCatalogos();
   }, []);
 
-  // Guardar Producto
+  // ==========================================
+  // MANEJADORES PRODUCTO (BERRY)
+  // ==========================================
+  const abrirCrearProducto = () => {
+    setProductoAEditar(null);
+    setPNombre('');
+    setPVariedad('');
+    setPUnidad('kg');
+    setPDesc('');
+    setModalProducto(true);
+  };
+
+  const abrirEditarProducto = (p: Producto) => {
+    setProductoAEditar(p);
+    setPNombre(p.nombre);
+    setPVariedad(p.variedad || '');
+    setPUnidad(p.unidad_base || 'kg');
+    setPDesc(p.descripcion || '');
+    setModalProducto(true);
+  };
+
   const handleGuardarProducto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pNombre.trim()) return;
     setGuardando(true);
     try {
-      const { error } = await supabase.from('productos').insert([
-        {
-          nombre: pNombre.trim(),
-          variedad: pVariedad.trim(),
-          unidad_base: pUnidad,
-          descripcion: pDesc.trim(),
-        },
-      ]);
-      if (error) throw error;
-      setPNombre('');
-      setPVariedad('');
-      setPDesc('');
+      if (productoAEditar) {
+        // Actualizar
+        const { error } = await supabase
+          .from('productos')
+          .update({
+            nombre: pNombre.trim(),
+            variedad: pVariedad.trim(),
+            unidad_base: pUnidad,
+            descripcion: pDesc.trim(),
+          })
+          .eq('id', productoAEditar.id);
+        if (error) throw error;
+      } else {
+        // Insertar
+        const { error } = await supabase.from('productos').insert([
+          {
+            nombre: pNombre.trim(),
+            variedad: pVariedad.trim(),
+            unidad_base: pUnidad,
+            descripcion: pDesc.trim(),
+          },
+        ]);
+        if (error) throw error;
+      }
+
       setModalProducto(false);
       await cargarCatalogos();
     } catch (err: unknown) {
@@ -115,24 +159,73 @@ export default function CatalogosPage() {
     }
   };
 
-  // Guardar Empaque
+  const handleEliminarProducto = async (id: number, nombre: string) => {
+    if (!confirm(`¿Estás seguro de eliminar el producto "${nombre}"?`)) return;
+    try {
+      const { error } = await supabase.from('productos').delete().eq('id', id);
+      if (error) {
+        if (error.code === '23503') {
+          alert('No se puede eliminar porque ya tiene compras o ventas registradas. Puedes cambiar su nombre o editarlo.');
+        } else {
+          throw error;
+        }
+      } else {
+        await cargarCatalogos();
+      }
+    } catch (err: unknown) {
+      alert('Error al eliminar: ' + (err instanceof Error ? err.message : 'Error'));
+    }
+  };
+
+  // ==========================================
+  // MANEJADORES EMPAQUE
+  // ==========================================
+  const abrirCrearEmpaque = () => {
+    setEmpaqueAEditar(null);
+    setENombre('');
+    setEGramaje('');
+    setEMaterial('Plástico PET');
+    setECapacidad('');
+    setModalEmpaque(true);
+  };
+
+  const abrirEditarEmpaque = (emp: EmpaqueTipo) => {
+    setEmpaqueAEditar(emp);
+    setENombre(emp.nombre);
+    setEGramaje(emp.gramaje_g ? emp.gramaje_g.toString() : '');
+    setEMaterial(emp.material || 'Plástico PET');
+    setECapacidad(emp.capacidad_desc || '');
+    setModalEmpaque(true);
+  };
+
   const handleGuardarEmpaque = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!eNombre.trim()) return;
     setGuardando(true);
     try {
-      const { error } = await supabase.from('empaque_tipos').insert([
-        {
-          nombre: eNombre.trim(),
-          gramaje_g: eGramaje ? parseFloat(eGramaje) : 0,
-          material: eMaterial,
-          capacidad_desc: eCapacidad.trim(),
-        },
-      ]);
-      if (error) throw error;
-      setENombre('');
-      setEGramaje('');
-      setECapacidad('');
+      if (empaqueAEditar) {
+        const { error } = await supabase
+          .from('empaque_tipos')
+          .update({
+            nombre: eNombre.trim(),
+            gramaje_g: eGramaje ? parseFloat(eGramaje) : 0,
+            material: eMaterial,
+            capacidad_desc: eCapacidad.trim(),
+          })
+          .eq('id', empaqueAEditar.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('empaque_tipos').insert([
+          {
+            nombre: eNombre.trim(),
+            gramaje_g: eGramaje ? parseFloat(eGramaje) : 0,
+            material: eMaterial,
+            capacidad_desc: eCapacidad.trim(),
+          },
+        ]);
+        if (error) throw error;
+      }
+
       setModalEmpaque(false);
       await cargarCatalogos();
     } catch (err: unknown) {
@@ -142,24 +235,73 @@ export default function CatalogosPage() {
     }
   };
 
-  // Guardar Cliente
+  const handleEliminarEmpaque = async (id: number, nombre: string) => {
+    if (!confirm(`¿Estás seguro de eliminar el empaque "${nombre}"?`)) return;
+    try {
+      const { error } = await supabase.from('empaque_tipos').delete().eq('id', id);
+      if (error) {
+        if (error.code === '23503') {
+          alert('No se puede eliminar porque tiene movimientos o ventas asociadas. Puedes editar sus datos.');
+        } else {
+          throw error;
+        }
+      } else {
+        await cargarCatalogos();
+      }
+    } catch (err: unknown) {
+      alert('Error al eliminar: ' + (err instanceof Error ? err.message : 'Error'));
+    }
+  };
+
+  // ==========================================
+  // MANEJADORES CLIENTE
+  // ==========================================
+  const abrirCrearCliente = () => {
+    setClienteAEditar(null);
+    setCNombre('');
+    setCContacto('');
+    setCTelefono('');
+    setCCiudad('Zamora');
+    setModalCliente(true);
+  };
+
+  const abrirEditarCliente = (c: Cliente) => {
+    setClienteAEditar(c);
+    setCNombre(c.nombre);
+    setCContacto(c.contacto || '');
+    setCTelefono(c.telefono || '');
+    setCCiudad(c.ciudad || 'Zamora');
+    setModalCliente(true);
+  };
+
   const handleGuardarCliente = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cNombre.trim()) return;
     setGuardando(true);
     try {
-      const { error } = await supabase.from('clientes').insert([
-        {
-          nombre: cNombre.trim(),
-          contacto: cContacto.trim(),
-          telefono: cTelefono.trim(),
-          ciudad: cCiudad.trim(),
-        },
-      ]);
-      if (error) throw error;
-      setCNombre('');
-      setCContacto('');
-      setCTelefono('');
+      if (clienteAEditar) {
+        const { error } = await supabase
+          .from('clientes')
+          .update({
+            nombre: cNombre.trim(),
+            contacto: cContacto.trim(),
+            telefono: cTelefono.trim(),
+            ciudad: cCiudad.trim(),
+          })
+          .eq('id', clienteAEditar.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('clientes').insert([
+          {
+            nombre: cNombre.trim(),
+            contacto: cContacto.trim(),
+            telefono: cTelefono.trim(),
+            ciudad: cCiudad.trim(),
+          },
+        ]);
+        if (error) throw error;
+      }
+
       setModalCliente(false);
       await cargarCatalogos();
     } catch (err: unknown) {
@@ -169,25 +311,77 @@ export default function CatalogosPage() {
     }
   };
 
-  // Guardar Proveedor
+  const handleEliminarCliente = async (id: number, nombre: string) => {
+    if (!confirm(`¿Estás seguro de eliminar el cliente "${nombre}"?`)) return;
+    try {
+      const { error } = await supabase.from('clientes').delete().eq('id', id);
+      if (error) {
+        if (error.code === '23503') {
+          alert('No se puede eliminar porque ya tiene ventas o cajas asociadas en la base de datos.');
+        } else {
+          throw error;
+        }
+      } else {
+        await cargarCatalogos();
+      }
+    } catch (err: unknown) {
+      alert('Error al eliminar: ' + (err instanceof Error ? err.message : 'Error'));
+    }
+  };
+
+  // ==========================================
+  // MANEJADORES PROVEEDOR / HUERTA
+  // ==========================================
+  const abrirCrearProveedor = () => {
+    setProveedorAEditar(null);
+    setPrNombre('');
+    setPrContacto('');
+    setPrTelefono('');
+    setPrHuerta('Zamora');
+    setPrBerry('Arándano');
+    setModalProveedor(true);
+  };
+
+  const abrirEditarProveedor = (pr: Proveedor) => {
+    setProveedorAEditar(pr);
+    setPrNombre(pr.nombre);
+    setPrContacto(pr.contacto || '');
+    setPrTelefono(pr.telefono || '');
+    setPrHuerta(pr.ubicacion_huerta || 'Zamora');
+    setPrBerry(pr.tipo_berry_principal || 'Arándano');
+    setModalProveedor(true);
+  };
+
   const handleGuardarProveedor = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prNombre.trim()) return;
     setGuardando(true);
     try {
-      const { error } = await supabase.from('proveedores').insert([
-        {
-          nombre: prNombre.trim(),
-          contacto: prContacto.trim(),
-          telefono: prTelefono.trim(),
-          ubicacion_huerta: prHuerta.trim(),
-          tipo_berry_principal: prBerry,
-        },
-      ]);
-      if (error) throw error;
-      setPrNombre('');
-      setPrContacto('');
-      setPrTelefono('');
+      if (proveedorAEditar) {
+        const { error } = await supabase
+          .from('proveedores')
+          .update({
+            nombre: prNombre.trim(),
+            contacto: prContacto.trim(),
+            telefono: prTelefono.trim(),
+            ubicacion_huerta: prHuerta.trim(),
+            tipo_berry_principal: prBerry,
+          })
+          .eq('id', proveedorAEditar.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('proveedores').insert([
+          {
+            nombre: prNombre.trim(),
+            contacto: prContacto.trim(),
+            telefono: prTelefono.trim(),
+            ubicacion_huerta: prHuerta.trim(),
+            tipo_berry_principal: prBerry,
+          },
+        ]);
+        if (error) throw error;
+      }
+
       setModalProveedor(false);
       await cargarCatalogos();
     } catch (err: unknown) {
@@ -196,6 +390,41 @@ export default function CatalogosPage() {
       setGuardando(false);
     }
   };
+
+  const handleEliminarProveedor = async (id: number, nombre: string) => {
+    if (!confirm(`¿Estás seguro de eliminar el productor / huerta "${nombre}"?`)) return;
+    try {
+      const { error } = await supabase.from('proveedores').delete().eq('id', id);
+      if (error) {
+        if (error.code === '23503') {
+          alert('No se puede eliminar porque ya tiene compras de fruta registradas.');
+        } else {
+          throw error;
+        }
+      } else {
+        await cargarCatalogos();
+      }
+    } catch (err: unknown) {
+      alert('Error al eliminar: ' + (err instanceof Error ? err.message : 'Error'));
+    }
+  };
+
+  // Filtrado de búsquedas
+  const productosFiltrados = productos.filter((p) =>
+    `${p.nombre} ${p.variedad || ''} ${p.descripcion || ''}`.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  const empaquesFiltrados = empaques.filter((e) =>
+    `${e.nombre} ${e.material || ''} ${e.capacidad_desc || ''}`.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  const clientesFiltrados = clientes.filter((c) =>
+    `${c.nombre} ${c.contacto || ''} ${c.ciudad || ''} ${c.telefono || ''}`.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  const proveedoresFiltrados = proveedores.filter((pr) =>
+    `${pr.nombre} ${pr.contacto || ''} ${pr.ubicacion_huerta || ''} ${pr.tipo_berry_principal || ''}`.toLowerCase().includes(busqueda.toLowerCase())
+  );
 
   return (
     <main className="p-4 space-y-4">
@@ -207,13 +436,14 @@ export default function CatalogosPage() {
             Catálogos y Configuración
           </h1>
           <p className="text-xs text-slate-500">
-            Registra y administra tipos de berries, empaques, clientes y huertas
+            Registra, edita y administra berries, empaques, clientes y huertas
           </p>
         </div>
 
         <button
           onClick={cargarCatalogos}
           className="p-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 shadow-sm"
+          title="Refrescar"
         >
           <RefreshCw className={`w-4 h-4 ${cargando ? 'animate-spin' : ''}`} />
         </button>
@@ -222,7 +452,10 @@ export default function CatalogosPage() {
       {/* Tabs */}
       <div className="grid grid-cols-4 gap-1 bg-slate-200/80 p-1 rounded-2xl text-xs font-bold text-center">
         <button
-          onClick={() => setTabActiva('productos')}
+          onClick={() => {
+            setTabActiva('productos');
+            setBusqueda('');
+          }}
           className={`py-2 rounded-xl transition flex flex-col items-center gap-1 ${
             tabActiva === 'productos' ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-600'
           }`}
@@ -232,7 +465,10 @@ export default function CatalogosPage() {
         </button>
 
         <button
-          onClick={() => setTabActiva('empaques')}
+          onClick={() => {
+            setTabActiva('empaques');
+            setBusqueda('');
+          }}
           className={`py-2 rounded-xl transition flex flex-col items-center gap-1 ${
             tabActiva === 'empaques' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600'
           }`}
@@ -242,7 +478,10 @@ export default function CatalogosPage() {
         </button>
 
         <button
-          onClick={() => setTabActiva('clientes')}
+          onClick={() => {
+            setTabActiva('clientes');
+            setBusqueda('');
+          }}
           className={`py-2 rounded-xl transition flex flex-col items-center gap-1 ${
             tabActiva === 'clientes' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600'
           }`}
@@ -252,7 +491,10 @@ export default function CatalogosPage() {
         </button>
 
         <button
-          onClick={() => setTabActiva('proveedores')}
+          onClick={() => {
+            setTabActiva('proveedores');
+            setBusqueda('');
+          }}
           className={`py-2 rounded-xl transition flex flex-col items-center gap-1 ${
             tabActiva === 'proveedores' ? 'bg-white text-amber-700 shadow-sm' : 'text-slate-600'
           }`}
@@ -260,6 +502,18 @@ export default function CatalogosPage() {
           <Users className="w-4 h-4" />
           <span>Huertas ({proveedores.length})</span>
         </button>
+      </div>
+
+      {/* Barra de Búsqueda Rápida */}
+      <div className="relative">
+        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+        <input
+          type="text"
+          placeholder={`Buscar en ${tabActiva}...`}
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm"
+        />
       </div>
 
       {/* TAB 1: PRODUCTOS / BERRIES */}
@@ -270,32 +524,50 @@ export default function CatalogosPage() {
               Tipos de Berries Registrados
             </h2>
             <button
-              onClick={() => setModalProducto(true)}
+              onClick={abrirCrearProducto}
               className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 shadow-sm active:scale-95 transition"
             >
-              <Plus className="w-3.5 h-3.5" /> Nuevo Producto
+              <Plus className="w-3.5 h-3.5" /> Nueva Berry
             </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {productos.map((p) => (
+            {productosFiltrados.map((p) => (
               <div
                 key={p.id}
-                className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between"
+                className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-2.5 hover:border-purple-300 transition"
               >
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-sm text-slate-900">{p.nombre}</span>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-extrabold text-sm text-slate-900">{p.nombre}</span>
                     <span className="text-[10px] bg-purple-50 text-purple-700 font-semibold px-2 py-0.5 rounded-full border border-purple-200">
-                      Unidad: {p.unidad_base}
+                      {p.unidad_base}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Variedad: {p.variedad || 'Estándar'}
+                    Variedad: <b className="text-slate-700">{p.variedad || 'Estándar'}</b>
                   </p>
                   {p.descripcion && (
                     <p className="text-[11px] text-slate-400 mt-1 italic">{p.descripcion}</p>
                   )}
+                </div>
+
+                {/* Acciones Editar y Borrar */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <button
+                    onClick={() => abrirEditarProducto(p)}
+                    className="text-purple-700 hover:text-purple-800 bg-purple-50 hover:bg-purple-100 font-semibold text-[11px] px-2.5 py-1 rounded-lg transition flex items-center gap-1"
+                  >
+                    <Edit2 className="w-3 h-3" /> Editar
+                  </button>
+
+                  <button
+                    onClick={() => handleEliminarProducto(p.id, p.nombre)}
+                    className="text-slate-400 hover:text-red-600 p-1 rounded-lg transition"
+                    title="Eliminar berry"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}
@@ -311,7 +583,7 @@ export default function CatalogosPage() {
               Catálogo de Cajas y Empaques
             </h2>
             <button
-              onClick={() => setModalEmpaque(true)}
+              onClick={abrirCrearEmpaque}
               className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 shadow-sm active:scale-95 transition"
             >
               <Plus className="w-3.5 h-3.5" /> Nuevo Empaque
@@ -319,19 +591,37 @@ export default function CatalogosPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {empaques.map((e) => (
+            {empaquesFiltrados.map((e) => (
               <div
                 key={e.id}
-                className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex items-start justify-between"
+                className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-2.5 hover:border-blue-300 transition"
               >
                 <div>
-                  <span className="font-bold text-sm text-slate-900 block">{e.nombre}</span>
+                  <span className="font-extrabold text-sm text-slate-900 block">{e.nombre}</span>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Material: <b>{e.material}</b> · {e.gramaje_g ? `${e.gramaje_g} gramos` : 'Cosecha/Granel'}
+                    Material: <b className="text-slate-700">{e.material}</b> · {e.gramaje_g ? `${e.gramaje_g} gramos` : 'Cosecha/Granel'}
                   </p>
                   {e.capacidad_desc && (
-                    <p className="text-[11px] text-slate-400 mt-0.5">{e.capacidad_desc}</p>
+                    <p className="text-[11px] text-slate-400 mt-1 italic">{e.capacidad_desc}</p>
                   )}
+                </div>
+
+                {/* Acciones Editar y Borrar */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <button
+                    onClick={() => abrirEditarEmpaque(e)}
+                    className="text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 font-semibold text-[11px] px-2.5 py-1 rounded-lg transition flex items-center gap-1"
+                  >
+                    <Edit2 className="w-3 h-3" /> Editar
+                  </button>
+
+                  <button
+                    onClick={() => handleEliminarEmpaque(e.id, e.nombre)}
+                    className="text-slate-400 hover:text-red-600 p-1 rounded-lg transition"
+                    title="Eliminar empaque"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}
@@ -347,7 +637,7 @@ export default function CatalogosPage() {
               Clientes y Exportadoras
             </h2>
             <button
-              onClick={() => setModalCliente(true)}
+              onClick={abrirCrearCliente}
               className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 shadow-sm active:scale-95 transition"
             >
               <Plus className="w-3.5 h-3.5" /> Nuevo Cliente
@@ -355,18 +645,47 @@ export default function CatalogosPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {clientes.map((c) => (
+            {clientesFiltrados.map((c) => (
               <div
                 key={c.id}
-                className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm"
+                className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-2.5 hover:border-emerald-300 transition"
               >
-                <span className="font-bold text-sm text-slate-900 block">{c.nombre}</span>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Contacto: {c.contacto || 'Sin contacto'} · {c.ciudad}
-                </p>
-                {c.telefono && (
-                  <p className="text-[11px] text-emerald-700 font-semibold mt-1">Tel: {c.telefono}</p>
-                )}
+                <div>
+                  <span className="font-extrabold text-sm text-slate-900 block">{c.nombre}</span>
+                  <div className="space-y-0.5 mt-1 text-xs text-slate-500">
+                    <p className="flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-slate-400 shrink-0" /> {c.ciudad || 'Zamora'}
+                    </p>
+                    {c.contacto && (
+                      <p className="flex items-center gap-1">
+                        <User className="w-3 h-3 text-slate-400 shrink-0" /> {c.contacto}
+                      </p>
+                    )}
+                    {c.telefono && (
+                      <p className="flex items-center gap-1 text-emerald-700 font-semibold">
+                        <Phone className="w-3 h-3 text-emerald-600 shrink-0" /> {c.telefono}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Acciones Editar y Borrar */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <button
+                    onClick={() => abrirEditarCliente(c)}
+                    className="text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 font-semibold text-[11px] px-2.5 py-1 rounded-lg transition flex items-center gap-1"
+                  >
+                    <Edit2 className="w-3 h-3" /> Editar
+                  </button>
+
+                  <button
+                    onClick={() => handleEliminarCliente(c.id, c.nombre)}
+                    className="text-slate-400 hover:text-red-600 p-1 rounded-lg transition"
+                    title="Eliminar cliente"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -381,7 +700,7 @@ export default function CatalogosPage() {
               Productores y Huertas Locales
             </h2>
             <button
-              onClick={() => setModalProveedor(true)}
+              onClick={abrirCrearProveedor}
               className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 shadow-sm active:scale-95 transition"
             >
               <Plus className="w-3.5 h-3.5" /> Nueva Huerta
@@ -389,35 +708,71 @@ export default function CatalogosPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {proveedores.map((p) => (
+            {proveedoresFiltrados.map((p) => (
               <div
                 key={p.id}
-                className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm"
+                className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-2.5 hover:border-amber-300 transition"
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-sm text-slate-900">{p.nombre}</span>
-                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                    {p.tipo_berry_principal}
-                  </span>
+                <div>
+                  <div className="flex items-start justify-between gap-1">
+                    <span className="font-extrabold text-sm text-slate-900">{p.nombre}</span>
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shrink-0">
+                      {p.tipo_berry_principal}
+                    </span>
+                  </div>
+
+                  <div className="space-y-0.5 mt-1 text-xs text-slate-500">
+                    <p className="flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-slate-400 shrink-0" /> {p.ubicacion_huerta}
+                    </p>
+                    {p.contacto && (
+                      <p className="flex items-center gap-1">
+                        <User className="w-3 h-3 text-slate-400 shrink-0" /> {p.contacto}
+                      </p>
+                    )}
+                    {p.telefono && (
+                      <p className="flex items-center gap-1 text-slate-700 font-semibold">
+                        <Phone className="w-3 h-3 text-slate-400 shrink-0" /> {p.telefono}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Productor: {p.contacto || 'Don Miguel'} · Ubicación: {p.ubicacion_huerta}
-                </p>
-                {p.telefono && (
-                  <p className="text-[11px] text-slate-600 font-semibold mt-1">Tel: {p.telefono}</p>
-                )}
+
+                {/* Acciones Editar y Borrar */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <button
+                    onClick={() => abrirEditarProveedor(p)}
+                    className="text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 font-semibold text-[11px] px-2.5 py-1 rounded-lg transition flex items-center gap-1"
+                  >
+                    <Edit2 className="w-3 h-3" /> Editar
+                  </button>
+
+                  <button
+                    onClick={() => handleEliminarProveedor(p.id, p.nombre)}
+                    className="text-slate-400 hover:text-red-600 p-1 rounded-lg transition"
+                    title="Eliminar huerta"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* MODAL NUEVO PRODUCTO */}
+      {/* ========================================================= */}
+      {/* MODALES CREAR / EDITAR */}
+      {/* ========================================================= */}
+
+      {/* MODAL PRODUCTO / BERRY */}
       {modalProducto && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 shadow-2xl animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-sm">Registrar Tipo de Berry / Producto</h3>
+              <h3 className="font-bold text-slate-900 text-sm">
+                {productoAEditar ? 'Editar Tipo de Berry' : 'Registrar Tipo de Berry / Producto'}
+              </h3>
               <button onClick={() => setModalProducto(false)} className="text-slate-400 p-1">
                 <X className="w-5 h-5" />
               </button>
@@ -480,24 +835,35 @@ export default function CatalogosPage() {
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={guardando}
-                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
-              >
-                {guardando ? 'Guardando...' : 'Crear Producto'}
-              </button>
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModalProducto(false)}
+                  className="w-1/3 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardando}
+                  className="w-2/3 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
+                >
+                  {guardando ? 'Guardando...' : productoAEditar ? 'Guardar Cambios' : 'Crear Producto'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL NUEVO EMPAQUE */}
+      {/* MODAL EMPAQUE */}
       {modalEmpaque && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 shadow-2xl animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-sm">Registrar Tipo de Caja / Empaque</h3>
+              <h3 className="font-bold text-slate-900 text-sm">
+                {empaqueAEditar ? 'Editar Tipo de Empaque' : 'Registrar Tipo de Caja / Empaque'}
+              </h3>
               <button onClick={() => setModalEmpaque(false)} className="text-slate-400 p-1">
                 <X className="w-5 h-5" />
               </button>
@@ -562,24 +928,35 @@ export default function CatalogosPage() {
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={guardando}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
-              >
-                {guardando ? 'Guardando...' : 'Crear Tipo de Empaque'}
-              </button>
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModalEmpaque(false)}
+                  className="w-1/3 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardando}
+                  className="w-2/3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
+                >
+                  {guardando ? 'Guardando...' : empaqueAEditar ? 'Guardar Cambios' : 'Crear Tipo de Empaque'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL NUEVO CLIENTE */}
+      {/* MODAL CLIENTE */}
       {modalCliente && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 shadow-2xl animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-sm">Registrar Cliente Comercial</h3>
+              <h3 className="font-bold text-slate-900 text-sm">
+                {clienteAEditar ? 'Editar Cliente Comercial' : 'Registrar Cliente Comercial'}
+              </h3>
               <button onClick={() => setModalCliente(false)} className="text-slate-400 p-1">
                 <X className="w-5 h-5" />
               </button>
@@ -639,24 +1016,35 @@ export default function CatalogosPage() {
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={guardando}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
-              >
-                {guardando ? 'Guardando...' : 'Crear Cliente'}
-              </button>
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModalCliente(false)}
+                  className="w-1/3 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardando}
+                  className="w-2/3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
+                >
+                  {guardando ? 'Guardando...' : clienteAEditar ? 'Guardar Cambios' : 'Crear Cliente'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL NUEVA HUERTA / PROVEEDOR */}
+      {/* MODAL PROVEEDOR / HUERTA */}
       {modalProveedor && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 shadow-2xl animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-bold text-slate-900 text-sm">Registrar Huerta / Productor</h3>
+              <h3 className="font-bold text-slate-900 text-sm">
+                {proveedorAEditar ? 'Editar Huerta / Productor' : 'Registrar Huerta / Productor'}
+              </h3>
               <button onClick={() => setModalProveedor(false)} className="text-slate-400 p-1">
                 <X className="w-5 h-5" />
               </button>
@@ -729,13 +1117,22 @@ export default function CatalogosPage() {
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={guardando}
-                className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
-              >
-                {guardando ? 'Guardando...' : 'Crear Productor'}
-              </button>
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModalProveedor(false)}
+                  className="w-1/3 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardando}
+                  className="w-2/3 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm"
+                >
+                  {guardando ? 'Guardando...' : proveedorAEditar ? 'Guardar Cambios' : 'Crear Productor'}
+                </button>
+              </div>
             </form>
           </div>
         </div>
