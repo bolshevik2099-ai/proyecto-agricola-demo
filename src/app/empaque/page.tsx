@@ -14,12 +14,21 @@ import {
   RefreshCw, 
   Search, 
   CheckCircle2, 
-  AlertTriangle,
-  History,
-  Boxes,
-  FileText,
-  X
+  History, 
+  Boxes, 
+  FileText, 
+  X,
+  Edit2,
+  Trash2,
+  Building2,
+  Eye,
+  Layers,
+  Calendar,
+  ChevronRight,
+  ExternalLink
 } from 'lucide-react';
+
+type VistaModo = 'clientes' | 'empaques';
 
 export default function EmpaquePage() {
   const { usuarioActual } = useAuth();
@@ -30,18 +39,38 @@ export default function EmpaquePage() {
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
 
-  // Filtros
-  const [filtroCliente, setFiltroCliente] = useState<string>('todos');
+  // Modo de vista: 'clientes' o 'empaques'
+  const [vistaModo, setVistaModo] = useState<VistaModo>('clientes');
+  const [filtroId, setFiltroId] = useState<string>('todos');
   const [busqueda, setBusqueda] = useState('');
 
-  // Modal para registrar movimiento
-  const [modalAbierto, setModalAbierto] = useState(false);
+  // Modal para registrar NUEVO movimiento
+  const [modalRegistroAbierto, setModalRegistroAbierto] = useState(false);
   const [tipoMovimiento, setTipoMovimiento] = useState<TipoMovimientoEmpaque>('entrada_cliente');
   const [clienteId, setClienteId] = useState<string>('');
   const [empaqueTipoId, setEmpaqueTipoId] = useState<string>('');
   const [cantidad, setCantidad] = useState<string>('');
   const [comprobanteUrl, setComprobanteUrl] = useState<string>('');
   const [notas, setNotas] = useState<string>('');
+
+  // Modal DETALLE de Cliente seleccionado
+  const [clienteDetalle, setClienteDetalle] = useState<Cliente | null>(null);
+
+  // Modal DETALLE de Empaque seleccionado
+  const [empaqueDetalle, setEmpaqueDetalle] = useState<EmpaqueTipo | null>(null);
+
+  // Modal EDITAR movimiento existente
+  const [movimientoAEditar, setMovimientoAEditar] = useState<EmpaqueMovimiento | null>(null);
+  const [editTipo, setEditTipo] = useState<TipoMovimientoEmpaque>('entrada_cliente');
+  const [editClienteId, setEditClienteId] = useState<string>('');
+  const [editEmpaqueId, setEditEmpaqueId] = useState<string>('');
+  const [editCantidad, setEditCantidad] = useState<string>('');
+  const [editNotas, setEditNotas] = useState<string>('');
+  const [editComprobanteUrl, setEditComprobanteUrl] = useState<string>('');
+  const [editFecha, setEditFecha] = useState<string>('');
+
+  // Modal foto / comprobante a pantalla completa
+  const [fotoModal, setFotoModal] = useState<string | null>(null);
 
   const cargarDatos = async () => {
     setCargando(true);
@@ -56,9 +85,8 @@ export default function EmpaquePage() {
       // 2. Historial de movimientos
       const { data: mData } = await supabase
         .from('empaque_movimientos')
-        .select('*, clientes(nombre), empaque_tipos(nombre, gramaje_g, material), usuarios(nombre)')
-        .order('fecha', { ascending: false })
-        .limit(30);
+        .select('*, clientes(nombre, ciudad), empaque_tipos(nombre, gramaje_g, material), usuarios(nombre)')
+        .order('fecha', { ascending: false });
 
       if (mData) {
         setMovimientos(
@@ -103,10 +131,11 @@ export default function EmpaquePage() {
     cargarDatos();
   }, []);
 
-  const handleSubmitMovimiento = async (e: React.FormEvent) => {
+  // Crear nuevo movimiento
+  const handleSubmitNuevo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clienteId || !empaqueTipoId || !cantidad || Number(cantidad) <= 0) {
-      alert('Por favor completa todos los campos requeridos con una cantidad válida.');
+      alert('Por favor completa todos los campos con una cantidad válida.');
       return;
     }
 
@@ -126,11 +155,10 @@ export default function EmpaquePage() {
 
       if (error) throw error;
 
-      // Limpiar y recargar
       setCantidad('');
       setNotas('');
       setComprobanteUrl('');
-      setModalAbierto(false);
+      setModalRegistroAbierto(false);
       await cargarDatos();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al registrar movimiento';
@@ -140,13 +168,121 @@ export default function EmpaquePage() {
     }
   };
 
-  // Filtrado de saldos
-  const saldosFiltrados = saldos.filter((s) => {
-    const matchCliente = filtroCliente === 'todos' || s.cliente_id.toString() === filtroCliente;
-    const matchBusqueda =
-      s.cliente_nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-      s.empaque_nombre.toLowerCase().includes(busqueda.toLowerCase());
-    return matchCliente && matchBusqueda;
+  // Abrir modal de edición
+  const abrirEdicion = (mov: EmpaqueMovimiento) => {
+    setMovimientoAEditar(mov);
+    setEditTipo(mov.tipo_movimiento);
+    setEditClienteId(mov.cliente_id.toString());
+    setEditEmpaqueId(mov.empaque_tipo_id.toString());
+    setEditCantidad(mov.cantidad.toString());
+    setEditNotas(mov.notas || '');
+    setEditComprobanteUrl(mov.comprobante_url || '');
+    setEditFecha(mov.fecha ? new Date(mov.fecha).toISOString().slice(0, 16) : '');
+  };
+
+  // Guardar edición
+  const handleGuardarEdicion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!movimientoAEditar || !editClienteId || !editEmpaqueId || !editCantidad || Number(editCantidad) <= 0) {
+      alert('Datos de edición no válidos.');
+      return;
+    }
+
+    setGuardando(true);
+    try {
+      const { error } = await supabase
+        .from('empaque_movimientos')
+        .update({
+          tipo_movimiento: editTipo,
+          cliente_id: parseInt(editClienteId),
+          empaque_tipo_id: parseInt(editEmpaqueId),
+          cantidad: parseInt(editCantidad),
+          notas: editNotas.trim(),
+          comprobante_url: editComprobanteUrl,
+          ...(editFecha ? { fecha: new Date(editFecha).toISOString() } : {}),
+        })
+        .eq('id', movimientoAEditar.id);
+
+      if (error) throw error;
+
+      setMovimientoAEditar(null);
+      await cargarDatos();
+    } catch (err: unknown) {
+      alert('Error al actualizar movimiento: ' + (err instanceof Error ? err.message : 'Error desconocido'));
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  // Eliminar movimiento
+  const handleEliminarMovimiento = async (id: number, desc: string) => {
+    if (!confirm(`¿Estás seguro de eliminar este registro de movimiento?\n"${desc}"\nEsta acción recalculará los saldos automáticamente.`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('empaque_movimientos')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      await cargarDatos();
+    } catch (err: unknown) {
+      alert('Error al eliminar: ' + (err instanceof Error ? err.message : 'Error desconocido'));
+    }
+  };
+
+  // Agrupaciones
+  // 1. Por Clientes
+  const clientesConSaldos = clientes.map((c) => {
+    const saldosDelCliente = saldos.filter((s) => s.cliente_id === c.id);
+    const totalRecibido = saldosDelCliente.reduce((acc, s) => acc + Number(s.total_recibido), 0);
+    const totalEntregado = saldosDelCliente.reduce((acc, s) => acc + Number(s.total_entregado), 0);
+    const saldoTotal = saldosDelCliente.reduce((acc, s) => acc + Number(s.saldo_disponible), 0);
+    const movsDelCliente = movimientos.filter((m) => m.cliente_id === c.id);
+
+    return {
+      cliente: c,
+      saldos: saldosDelCliente,
+      totalRecibido,
+      totalEntregado,
+      saldoTotal,
+      movimientosCount: movsDelCliente.length,
+    };
+  });
+
+  // 2. Por Empaques
+  const empaquesConSaldos = tiposEmpaque.map((e) => {
+    const saldosDelEmpaque = saldos.filter((s) => s.empaque_tipo_id === e.id);
+    const totalRecibido = saldosDelEmpaque.reduce((acc, s) => acc + Number(s.total_recibido), 0);
+    const totalEntregado = saldosDelEmpaque.reduce((acc, s) => acc + Number(s.total_entregado), 0);
+    const saldoTotal = saldosDelEmpaque.reduce((acc, s) => acc + Number(s.saldo_disponible), 0);
+    const movsDelEmpaque = movimientos.filter((m) => m.empaque_tipo_id === e.id);
+
+    return {
+      empaque: e,
+      saldos: saldosDelEmpaque,
+      totalRecibido,
+      totalEntregado,
+      saldoTotal,
+      movimientosCount: movsDelEmpaque.length,
+    };
+  });
+
+  // Filtrado de lista principal según modo
+  const clientesFiltrados = clientesConSaldos.filter((item) => {
+    const matchFiltro = filtroId === 'todos' || item.cliente.id.toString() === filtroId;
+    const matchBusqueda = item.cliente.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+                          item.cliente.ciudad.toLowerCase().includes(busqueda.toLowerCase());
+    return matchFiltro && matchBusqueda;
+  });
+
+  const empaquesFiltrados = empaquesConSaldos.filter((item) => {
+    const matchFiltro = filtroId === 'todos' || item.empaque.id.toString() === filtroId;
+    const matchBusqueda = item.empaque.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
+                          item.empaque.material.toLowerCase().includes(busqueda.toLowerCase());
+    return matchFiltro && matchBusqueda;
   });
 
   return (
@@ -159,26 +295,66 @@ export default function EmpaquePage() {
             Control de Empaque
           </h1>
           <p className="text-xs text-slate-500">
-            Cajas que te entregan los clientes vs lo que les devuelves
+            Cajas de clientes: entradas, salidas, saldos e historial
           </p>
         </div>
 
         <button
-          onClick={() => setModalAbierto(true)}
+          onClick={() => {
+            setTipoMovimiento('entrada_cliente');
+            setModalRegistroAbierto(true);
+          }}
           className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-md shadow-blue-200 active:scale-95 transition"
         >
           <Plus className="w-4 h-4" /> Registrar Cajas
         </button>
       </div>
 
-      {/* Selector de Cliente y Búsqueda */}
+      {/* SELECTOR DE VISTA: POR CLIENTE O POR EMPAQUE */}
+      <div className="bg-slate-200/80 p-1 rounded-2xl grid grid-cols-2 gap-1 text-xs font-bold text-center">
+        <button
+          onClick={() => {
+            setVistaModo('clientes');
+            setFiltroId('todos');
+          }}
+          className={`py-2 rounded-xl transition flex items-center justify-center gap-1.5 ${
+            vistaModo === 'clientes'
+              ? 'bg-white text-blue-700 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          <span>Ver por Cliente ({clientes.length})</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setVistaModo('empaques');
+            setFiltroId('todos');
+          }}
+          className={`py-2 rounded-xl transition flex items-center justify-center gap-1.5 ${
+            vistaModo === 'empaques'
+              ? 'bg-white text-blue-700 shadow-sm'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Boxes className="w-4 h-4" />
+          <span>Ver por Empaque ({tiposEmpaque.length})</span>
+        </button>
+      </div>
+
+      {/* Barra de Búsqueda y Píldoras de Filtro Rápido */}
       <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm space-y-2.5">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
-              placeholder="Buscar empaque o cliente..."
+              placeholder={
+                vistaModo === 'clientes'
+                  ? 'Buscar por nombre de cliente o ciudad...'
+                  : 'Buscar por tipo de caja o material...'
+              }
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -193,185 +369,587 @@ export default function EmpaquePage() {
           </button>
         </div>
 
-        {/* Píldoras de filtro por cliente */}
+        {/* Píldoras de selección directa */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
           <button
-            onClick={() => setFiltroCliente('todos')}
+            onClick={() => setFiltroId('todos')}
             className={`px-3 py-1 rounded-full whitespace-nowrap text-[11px] font-semibold transition ${
-              filtroCliente === 'todos'
+              filtroId === 'todos'
                 ? 'bg-blue-600 text-white'
                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            Todos los clientes
+            {vistaModo === 'clientes' ? 'Todos los clientes' : 'Todos los empaques'}
           </button>
-          {clientes.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setFiltroCliente(c.id.toString())}
-              className={`px-3 py-1 rounded-full whitespace-nowrap text-[11px] font-semibold transition ${
-                filtroCliente === c.id.toString()
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {c.nombre}
-            </button>
-          ))}
-        </div>
-      </div>
 
-      {/* TARJETAS DE SALDOS POR CLIENTE */}
-      <div className="space-y-2.5">
-        <div className="flex items-center justify-between px-1">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-            Saldos Actuales en Bodega
-          </h2>
-          <span className="text-[11px] text-slate-400 font-medium">
-            {saldosFiltrados.length} registros
-          </span>
-        </div>
-
-        {cargando && saldos.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 bg-white rounded-2xl border border-slate-200">
-            <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
-            <p className="text-xs">Cargando inventario de cajas...</p>
-          </div>
-        ) : saldosFiltrados.length === 0 ? (
-          <div className="p-8 text-center bg-white rounded-2xl border border-dashed border-slate-200 text-slate-400 text-xs">
-            No se encontraron saldos de empaque con los filtros seleccionados.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {saldosFiltrados.map((item, index) => {
-              const saldo = Number(item.saldo_disponible);
-              const colorSaldo =
-                saldo > 500
-                  ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                  : saldo > 0
-                  ? 'text-blue-700 bg-blue-50 border-blue-200'
-                  : 'text-amber-700 bg-amber-50 border-amber-200';
-
-              return (
-                <div
-                  key={index}
-                  className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-3"
+          {vistaModo === 'clientes'
+            ? clientes.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => setFiltroId(c.id.toString())}
+                  className={`px-3 py-1 rounded-full whitespace-nowrap text-[11px] font-semibold transition ${
+                    filtroId === c.id.toString()
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
                 >
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        {item.cliente_nombre}
-                      </span>
-                      <span
-                        className={`text-xs font-black px-2.5 py-1 rounded-xl border ${colorSaldo}`}
-                      >
-                        {saldo.toLocaleString()} disp.
-                      </span>
-                    </div>
-                    <h3 className="font-bold text-sm text-slate-900 mt-1">{item.empaque_nombre}</h3>
-                    <p className="text-[11px] text-slate-500">
-                      Material: {item.material} · {item.gramaje_g ? `${item.gramaje_g}g` : 'Granel/Cosecha'}
-                    </p>
-                  </div>
-
-                  {/* Detalle Entradas vs Salidas */}
-                  <div className="grid grid-cols-2 gap-2 pt-2.5 border-t border-slate-100 text-[11px]">
-                    <div className="flex items-center gap-1.5 text-emerald-700">
-                      <ArrowDownLeft className="w-3.5 h-3.5 shrink-0" />
-                      <span>Recibidas: <b>{Number(item.total_recibido).toLocaleString()}</b></span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-slate-600">
-                      <ArrowUpRight className="w-3.5 h-3.5 shrink-0 text-amber-600" />
-                      <span>Devueltas: <b>{Number(item.total_entregado).toLocaleString()}</b></span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                  {c.nombre}
+                </button>
+              ))
+            : tiposEmpaque.map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => setFiltroId(e.id.toString())}
+                  className={`px-3 py-1 rounded-full whitespace-nowrap text-[11px] font-semibold transition ${
+                    filtroId === e.id.toString()
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {e.nombre}
+                </button>
+              ))}
+        </div>
       </div>
 
-      {/* HISTORIAL RECIENTE DE MOVIMIENTOS */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-          <History className="w-4 h-4 text-slate-400" /> Historial de Entradas y Salidas
-        </h3>
+      {/* VISTA 1: LISTADO POR CLIENTE */}
+      {vistaModo === 'clientes' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Relación de Clientes y Material en Bodega
+            </h2>
+            <span className="text-[11px] text-slate-400 font-medium">
+              {clientesFiltrados.length} clientes
+            </span>
+          </div>
 
-        {movimientos.length === 0 ? (
-          <p className="text-xs text-slate-400 text-center py-4">No hay movimientos registrados.</p>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {movimientos.map((m) => {
-              const esEntrada = m.tipo_movimiento === 'entrada_cliente';
-              const esSalida = m.tipo_movimiento === 'salida_a_cliente';
-
-              return (
-                <div key={m.id} className="py-2.5 flex items-start justify-between gap-3 text-xs">
-                  <div className="flex items-start gap-2.5">
-                    <div
-                      className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
-                        esEntrada
-                          ? 'bg-emerald-100 text-emerald-700'
-                          : esSalida
-                          ? 'bg-amber-100 text-amber-700'
-                          : 'bg-purple-100 text-purple-700'
-                      }`}
-                    >
-                      {esEntrada ? (
-                        <ArrowDownLeft className="w-4 h-4" />
-                      ) : esSalida ? (
-                        <ArrowUpRight className="w-4 h-4" />
-                      ) : (
-                        <RotateCcw className="w-4 h-4" />
-                      )}
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-900">
-                        {esEntrada
-                          ? `Cliente entregó: ${m.cliente_nombre}`
-                          : esSalida
-                          ? `Entregado a cliente: ${m.cliente_nombre}`
-                          : `Ajuste de inventario`}
-                      </p>
-                      <p className="text-[11px] text-slate-500">{m.empaque_nombre}</p>
-                      {m.notas && (
-                        <p className="text-[10px] text-slate-400 italic mt-0.5">"{m.notas}"</p>
-                      )}
-                      <span className="text-[10px] text-slate-400 mt-1 block">
-                        {new Date(m.fecha).toLocaleDateString('es-MX', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                        })} · Registró {m.usuario_nombre || 'Sistema'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-right shrink-0">
-                    <span
-                      className={`font-black text-sm block ${
-                        esEntrada ? 'text-emerald-700' : 'text-slate-800'
-                      }`}
-                    >
-                      {esEntrada ? '+' : '-'}{m.cantidad.toLocaleString()}
+          {cargando && saldos.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 bg-white rounded-2xl border border-slate-200">
+              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
+              <p className="text-xs">Cargando relación de empaques...</p>
+            </div>
+          ) : clientesFiltrados.length === 0 ? (
+            <div className="p-8 text-center bg-white rounded-2xl border border-dashed border-slate-200 text-slate-400 text-xs">
+              No se encontraron clientes con los filtros seleccionados.
+            </div>
+          ) : (
+            clientesFiltrados.map((item) => (
+              <div
+                key={item.cliente.id}
+                className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3 hover:border-blue-400 transition"
+              >
+                {/* Cabecera del cliente */}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      {item.cliente.ciudad || 'Zamora'}
                     </span>
-                    <span className="text-[10px] text-slate-400">cajas</span>
-                    {m.comprobante_url && (
-                      <span className="inline-flex items-center gap-0.5 text-[10px] text-blue-600 font-semibold mt-1">
-                        <FileText className="w-3 h-3" /> Foto
-                      </span>
+                    <h3 className="font-extrabold text-base text-slate-900 leading-tight">
+                      {item.cliente.nombre}
+                    </h3>
+                    {item.cliente.contacto && (
+                      <p className="text-xs text-slate-500 mt-0.5">Contacto: {item.cliente.contacto}</p>
                     )}
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
 
-      {/* MODAL REGISTRAR MOVIMIENTO (ENTRADA / SALIDA) */}
-      {modalAbierto && (
+                  <div className="text-right">
+                    <span className="text-xs font-black px-2.5 py-1 rounded-xl border bg-blue-50 text-blue-700 border-blue-200 block">
+                      {item.saldoTotal.toLocaleString()} cajas disp.
+                    </span>
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">Saldo neto en Tamfresh</span>
+                  </div>
+                </div>
+
+                {/* Desglose resumido de empaques de este cliente */}
+                <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 pb-1 border-b border-slate-200/60">
+                    <span>Tipo de Empaque</span>
+                    <span>Recibidas / Devueltas / Saldo</span>
+                  </div>
+
+                  {item.saldos.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic py-1">Sin cajas registradas</p>
+                  ) : (
+                    item.saldos.map((s) => (
+                      <div key={s.empaque_tipo_id} className="flex items-center justify-between text-xs py-0.5">
+                        <span className="text-slate-800 font-medium truncate max-w-[160px] sm:max-w-xs">
+                          {s.empaque_nombre}
+                        </span>
+                        <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                          <span className="text-emerald-700 font-semibold">+{Number(s.total_recibido).toLocaleString()}</span>
+                          <span className="text-slate-300">/</span>
+                          <span className="text-amber-700 font-semibold">-{Number(s.total_entregado).toLocaleString()}</span>
+                          <span className="text-slate-300">/</span>
+                          <span className="text-blue-700 font-black bg-blue-100/60 px-1.5 rounded">
+                            {Number(s.saldo_disponible).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Botón para Abrir Detalle y Editar/Borrar Movimientos */}
+                <div className="pt-1 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400">
+                    {item.movimientosCount} movimiento(s) registrado(s)
+                  </span>
+
+                  <button
+                    onClick={() => setClienteDetalle(item.cliente)}
+                    className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs px-3 py-1.5 rounded-xl border border-blue-200 transition flex items-center gap-1"
+                  >
+                    <span>Ver y Editar Detalle</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* VISTA 2: LISTADO POR TIPO DE EMPAQUE */}
+      {vistaModo === 'empaques' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Relación por Tipo de Empaque y Cajas
+            </h2>
+            <span className="text-[11px] text-slate-400 font-medium">
+              {empaquesFiltrados.length} tipos de empaque
+            </span>
+          </div>
+
+          {cargando && saldos.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 bg-white rounded-2xl border border-slate-200">
+              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
+              <p className="text-xs">Cargando empaques...</p>
+            </div>
+          ) : empaquesFiltrados.length === 0 ? (
+            <div className="p-8 text-center bg-white rounded-2xl border border-dashed border-slate-200 text-slate-400 text-xs">
+              No se encontraron tipos de empaque con los filtros seleccionados.
+            </div>
+          ) : (
+            empaquesFiltrados.map((item) => (
+              <div
+                key={item.empaque.id}
+                className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3 hover:border-blue-400 transition"
+              >
+                {/* Cabecera del empaque */}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      {item.empaque.material} {item.empaque.gramaje_g ? `· ${item.empaque.gramaje_g}g` : ''}
+                    </span>
+                    <h3 className="font-extrabold text-base text-slate-900 leading-tight">
+                      {item.empaque.nombre}
+                    </h3>
+                    {item.empaque.capacidad_desc && (
+                      <p className="text-xs text-slate-500 mt-0.5">{item.empaque.capacidad_desc}</p>
+                    )}
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-xs font-black px-2.5 py-1 rounded-xl border bg-emerald-50 text-emerald-700 border-emerald-200 block">
+                      {item.saldoTotal.toLocaleString()} en stock
+                    </span>
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">Total en bodega</span>
+                  </div>
+                </div>
+
+                {/* Desglose por cliente para este empaque */}
+                <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-100 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 pb-1 border-b border-slate-200/60">
+                    <span>Cliente Propietario</span>
+                    <span>Recibidas / Devueltas / Saldo</span>
+                  </div>
+
+                  {item.saldos.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic py-1">Sin stock con clientes</p>
+                  ) : (
+                    item.saldos.map((s) => (
+                      <div key={s.cliente_id} className="flex items-center justify-between text-xs py-0.5">
+                        <span className="text-slate-800 font-medium truncate max-w-[160px] sm:max-w-xs">
+                          {s.cliente_nombre}
+                        </span>
+                        <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                          <span className="text-emerald-700 font-semibold">+{Number(s.total_recibido).toLocaleString()}</span>
+                          <span className="text-slate-300">/</span>
+                          <span className="text-amber-700 font-semibold">-{Number(s.total_entregado).toLocaleString()}</span>
+                          <span className="text-slate-300">/</span>
+                          <span className="text-blue-700 font-black bg-blue-100/60 px-1.5 rounded">
+                            {Number(s.saldo_disponible).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Botón para Abrir Detalle de este Empaque */}
+                <div className="pt-1 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400">
+                    {item.movimientosCount} movimiento(s) registrado(s)
+                  </span>
+
+                  <button
+                    onClick={() => setEmpaqueDetalle(item.empaque)}
+                    className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs px-3 py-1.5 rounded-xl border border-blue-200 transition flex items-center gap-1"
+                  >
+                    <span>Ver Movimientos y Detalle</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* MODAL DETALLE DE CLIENTE (VER, EDITAR Y BORRAR ENTRADAS/SALIDAS DE ESE CLIENTE) */}
+      {clienteDetalle && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-2xl w-full p-5 shadow-2xl max-h-[92vh] overflow-y-auto animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150">
+            {/* Cabecera */}
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Relación Completa de Empaque
+                </span>
+                <h2 className="text-lg font-black text-slate-900">{clienteDetalle.nombre}</h2>
+                <p className="text-xs text-slate-500">
+                  {clienteDetalle.ciudad} {clienteDetalle.contacto ? `· Contacto: ${clienteDetalle.contacto}` : ''} {clienteDetalle.telefono ? `· Tel: ${clienteDetalle.telefono}` : ''}
+                </p>
+              </div>
+
+              <button
+                onClick={() => setClienteDetalle(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Saldos por Tipo de Empaque de este Cliente */}
+            <div className="my-4 space-y-2">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <Boxes className="w-4 h-4 text-blue-600" /> Saldos Actuales por Empaque
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {saldos.filter((s) => s.cliente_id === clienteDetalle.id).map((s) => (
+                  <div key={s.empaque_tipo_id} className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <div className="flex items-start justify-between">
+                      <span className="font-bold text-xs text-slate-900">{s.empaque_nombre}</span>
+                      <span className="text-xs font-black text-blue-700 bg-blue-100 px-2 py-0.5 rounded-md">
+                        {Number(s.saldo_disponible).toLocaleString()} disp.
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 pt-1 border-t border-slate-200/60">
+                      <span>Recibidas: <b>+{Number(s.total_recibido).toLocaleString()}</b></span>
+                      <span>Devueltas: <b>-{Number(s.total_entregado).toLocaleString()}</b></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Botón rápido para agregar movimiento a este cliente */}
+            <div className="mb-4">
+              <button
+                onClick={() => {
+                  setClienteId(clienteDetalle.id.toString());
+                  setTipoMovimiento('entrada_cliente');
+                  setModalRegistroAbierto(true);
+                }}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition"
+              >
+                <Plus className="w-4 h-4" /> Registrar Nuevo Movimiento con {clienteDetalle.nombre}
+              </button>
+            </div>
+
+            {/* Historial de Entradas y Salidas de este Cliente con Editar / Borrar */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <History className="w-4 h-4 text-slate-500" /> Movimientos Registrados (Entradas / Salidas)
+              </h3>
+
+              {movimientos.filter((m) => m.cliente_id === clienteDetalle.id).length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6 bg-slate-50 rounded-xl">
+                  No hay movimientos registrados para este cliente.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                  {movimientos
+                    .filter((m) => m.cliente_id === clienteDetalle.id)
+                    .map((m) => {
+                      const esEntrada = m.tipo_movimiento === 'entrada_cliente';
+                      const esSalida = m.tipo_movimiento === 'salida_a_cliente';
+
+                      return (
+                        <div key={m.id} className="p-3 hover:bg-slate-50/70 transition space-y-2">
+                          <div className="flex items-start justify-between gap-3 text-xs">
+                            <div className="flex items-start gap-2.5">
+                              <div
+                                className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
+                                  esEntrada
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : esSalida
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-purple-100 text-purple-700'
+                                }`}
+                              >
+                                {esEntrada ? (
+                                  <ArrowDownLeft className="w-4 h-4" />
+                                ) : esSalida ? (
+                                  <ArrowUpRight className="w-4 h-4" />
+                                ) : (
+                                  <RotateCcw className="w-4 h-4" />
+                                )}
+                              </div>
+                              <div>
+                                <p className="font-bold text-slate-900">
+                                  {esEntrada ? 'Cliente entregó cajas vacías' : esSalida ? 'Devueltas con fruta empacada' : 'Ajuste de inventario'}
+                                </p>
+                                <p className="text-[11px] text-slate-600 font-semibold">{m.empaque_nombre}</p>
+                                {m.notas && (
+                                  <p className="text-[11px] text-slate-500 italic mt-0.5">"{m.notas}"</p>
+                                )}
+                                <span className="text-[10px] text-slate-400 mt-1 block">
+                                  {new Date(m.fecha).toLocaleDateString('es-MX', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}{' '}
+                                  · Registró {m.usuario_nombre || 'Sistema'}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <span
+                                className={`font-black text-sm block ${
+                                  esEntrada ? 'text-emerald-700' : 'text-slate-800'
+                                }`}
+                              >
+                                {esEntrada ? '+' : '-'}{m.cantidad.toLocaleString()}
+                              </span>
+                              <span className="text-[10px] text-slate-400">cajas</span>
+                            </div>
+                          </div>
+
+                          {/* Botones de Acción: Ver Comprobante, Editar, Borrar */}
+                          <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-xs">
+                            {m.comprobante_url ? (
+                              <button
+                                onClick={() => setFotoModal(m.comprobante_url || null)}
+                                className="text-blue-600 font-semibold flex items-center gap-1 text-[11px] bg-blue-50 px-2 py-0.5 rounded-lg hover:bg-blue-100"
+                              >
+                                <Eye className="w-3 h-3" /> Ver Vale / Comprobante
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">Sin comprobante</span>
+                            )}
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => abrirEdicion(m)}
+                                className="text-slate-600 hover:text-blue-600 font-semibold flex items-center gap-1 text-[11px] bg-slate-100 hover:bg-blue-50 px-2.5 py-1 rounded-lg transition"
+                                title="Editar movimiento"
+                              >
+                                <Edit2 className="w-3 h-3" /> Editar
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  handleEliminarMovimiento(
+                                    m.id,
+                                    `${m.tipo_movimiento === 'entrada_cliente' ? 'Entrada' : 'Salida'} de ${m.cantidad} cajas (${m.empaque_nombre})`
+                                  )
+                                }
+                                className="text-slate-400 hover:text-red-600 p-1 rounded-lg transition"
+                                title="Eliminar registro"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DETALLE DE EMPAQUE (VER TODA LA RELACIÓN Y CLIENTES DE ESE EMPAQUE) */}
+      {empaqueDetalle && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-2xl w-full p-5 shadow-2xl max-h-[92vh] overflow-y-auto animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150">
+            {/* Cabecera */}
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Detalle de Material / Empaque
+                </span>
+                <h2 className="text-lg font-black text-slate-900">{empaqueDetalle.nombre}</h2>
+                <p className="text-xs text-slate-500">
+                  Material: {empaqueDetalle.material} {empaqueDetalle.gramaje_g ? `· Gramaje: ${empaqueDetalle.gramaje_g}g` : ''}
+                </p>
+              </div>
+
+              <button
+                onClick={() => setEmpaqueDetalle(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Saldos de este empaque repartido por cliente */}
+            <div className="my-4 space-y-2">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <Building2 className="w-4 h-4 text-blue-600" /> Stock en Bodega por Cliente
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {saldos.filter((s) => s.empaque_tipo_id === empaqueDetalle.id).map((s) => (
+                  <div key={s.cliente_id} className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    <div className="flex items-start justify-between">
+                      <span className="font-bold text-xs text-slate-900">{s.cliente_nombre}</span>
+                      <span className="text-xs font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                        {Number(s.saldo_disponible).toLocaleString()} en stock
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 pt-1 border-t border-slate-200/60">
+                      <span>Recibidas: <b>+{Number(s.total_recibido).toLocaleString()}</b></span>
+                      <span>Devueltas: <b>-{Number(s.total_entregado).toLocaleString()}</b></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Historial de Movimientos de este Empaque */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <History className="w-4 h-4 text-slate-500" /> Todos los Movimientos de este Empaque
+              </h3>
+
+              {movimientos.filter((m) => m.empaque_tipo_id === empaqueDetalle.id).length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6 bg-slate-50 rounded-xl">
+                  No hay movimientos registrados para este tipo de caja.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                  {movimientos
+                    .filter((m) => m.empaque_tipo_id === empaqueDetalle.id)
+                    .map((m) => {
+                      const esEntrada = m.tipo_movimiento === 'entrada_cliente';
+                      const esSalida = m.tipo_movimiento === 'salida_a_cliente';
+
+                      return (
+                        <div key={m.id} className="p-3 hover:bg-slate-50/70 transition space-y-2">
+                          <div className="flex items-start justify-between gap-3 text-xs">
+                            <div className="flex items-start gap-2.5">
+                              <div
+                                className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
+                                  esEntrada
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : esSalida
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-purple-100 text-purple-700'
+                                }`}
+                              >
+                                {esEntrada ? (
+                                  <ArrowDownLeft className="w-4 h-4" />
+                                ) : esSalida ? (
+                                  <ArrowUpRight className="w-4 h-4" />
+                                ) : (
+                                  <RotateCcw className="w-4 h-4" />
+                                )}
+                              </div>
+                              <div>
+                                <p className="font-bold text-slate-900">
+                                  {m.cliente_nombre} ({esEntrada ? 'Entregó cajas' : esSalida ? 'Devueltas con fruta' : 'Ajuste'})
+                                </p>
+                                {m.notas && (
+                                  <p className="text-[11px] text-slate-500 italic mt-0.5">"{m.notas}"</p>
+                                )}
+                                <span className="text-[10px] text-slate-400 mt-1 block">
+                                  {new Date(m.fecha).toLocaleDateString('es-MX', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric',
+                                  })}{' '}
+                                  · Registró {m.usuario_nombre || 'Sistema'}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <span
+                                className={`font-black text-sm block ${
+                                  esEntrada ? 'text-emerald-700' : 'text-slate-800'
+                                }`}
+                              >
+                                {esEntrada ? '+' : '-'}{m.cantidad.toLocaleString()}
+                              </span>
+                              <span className="text-[10px] text-slate-400">cajas</span>
+                            </div>
+                          </div>
+
+                          <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-xs">
+                            {m.comprobante_url ? (
+                              <button
+                                onClick={() => setFotoModal(m.comprobante_url || null)}
+                                className="text-blue-600 font-semibold flex items-center gap-1 text-[11px] bg-blue-50 px-2 py-0.5 rounded-lg hover:bg-blue-100"
+                              >
+                                <Eye className="w-3 h-3" /> Ver Comprobante
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">Sin comprobante</span>
+                            )}
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => abrirEdicion(m)}
+                                className="text-slate-600 hover:text-blue-600 font-semibold flex items-center gap-1 text-[11px] bg-slate-100 hover:bg-blue-50 px-2.5 py-1 rounded-lg transition"
+                                title="Editar movimiento"
+                              >
+                                <Edit2 className="w-3 h-3" /> Editar
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  handleEliminarMovimiento(
+                                    m.id,
+                                    `Movimiento de ${m.cantidad} cajas de ${m.cliente_nombre}`
+                                  )
+                                }
+                                className="text-slate-400 hover:text-red-600 p-1 rounded-lg transition"
+                                title="Eliminar registro"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REGISTRAR NUEVO MOVIMIENTO */}
+      {modalRegistroAbierto && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 shadow-2xl max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -385,15 +963,15 @@ export default function EmpaquePage() {
                 </div>
               </div>
               <button
-                onClick={() => setModalAbierto(false)}
+                onClick={() => setModalRegistroAbierto(false)}
                 className="text-slate-400 hover:text-slate-600 p-1"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmitMovimiento} className="space-y-3.5 mt-4">
-              {/* Selector de Tipo de Movimiento */}
+            <form onSubmit={handleSubmitNuevo} className="space-y-3.5 mt-4">
+              {/* Tipo de Operación */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Tipo de Operación
@@ -519,6 +1097,200 @@ export default function EmpaquePage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITAR MOVIMIENTO EXISTENTE */}
+      {movimientoAEditar && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 shadow-2xl max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-amber-100 text-amber-700 rounded-xl">
+                  <Edit2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Editar Movimiento de Empaque</h3>
+                  <p className="text-[11px] text-slate-500">ID #{movimientoAEditar.id}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setMovimientoAEditar(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleGuardarEdicion} className="space-y-3.5 mt-4">
+              {/* Tipo de Operación */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Tipo de Operación
+                </label>
+                <div className="grid grid-cols-3 gap-1.5 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setEditTipo('entrada_cliente')}
+                    className={`py-1.5 px-2 rounded-xl border text-center transition ${
+                      editTipo === 'entrada_cliente'
+                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    Entrada
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditTipo('salida_a_cliente')}
+                    className={`py-1.5 px-2 rounded-xl border text-center transition ${
+                      editTipo === 'salida_a_cliente'
+                        ? 'bg-amber-600 text-white border-amber-600'
+                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    Salida
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditTipo('ajuste')}
+                    className={`py-1.5 px-2 rounded-xl border text-center transition ${
+                      editTipo === 'ajuste'
+                        ? 'bg-purple-600 text-white border-purple-600'
+                        : 'bg-slate-50 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    Ajuste
+                  </button>
+                </div>
+              </div>
+
+              {/* Cliente */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Cliente
+                </label>
+                <select
+                  required
+                  value={editClienteId}
+                  onChange={(e) => setEditClienteId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl"
+                >
+                  {clientes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Empaque */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Tipo de Caja / Empaque
+                </label>
+                <select
+                  required
+                  value={editEmpaqueId}
+                  onChange={(e) => setEditEmpaqueId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl"
+                >
+                  {tiposEmpaque.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Cantidad */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Número de Cajas
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  step="1"
+                  value={editCantidad}
+                  onChange={(e) => setEditCantidad(e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-bold border border-slate-300 rounded-xl"
+                />
+              </div>
+
+              {/* Fecha */}
+              {editFecha && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Fecha del Movimiento
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={editFecha}
+                    onChange={(e) => setEditFecha(e.target.value)}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-xl"
+                  />
+                </div>
+              )}
+
+              {/* Comprobante */}
+              <FileUpload
+                label="Comprobante / Vale Adjunto"
+                onFileSelected={(url) => setEditComprobanteUrl(url)}
+                initialValue={editComprobanteUrl}
+              />
+
+              {/* Notas */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Notas</label>
+                <input
+                  type="text"
+                  value={editNotas}
+                  onChange={(e) => setEditNotas(e.target.value)}
+                  className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-xl"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMovimientoAEditar(null)}
+                  className="w-1/3 bg-slate-100 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={guardando}
+                  className="w-2/3 bg-amber-600 hover:bg-amber-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm flex items-center justify-center gap-1.5"
+                >
+                  {guardando ? 'Actualizando...' : 'Guardar Cambios'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL VER COMPROBANTE / FOTO EN GRANDE */}
+      {fotoModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="relative max-w-lg w-full bg-white rounded-2xl p-3 shadow-2xl">
+            <button
+              onClick={() => setFotoModal(null)}
+              className="absolute top-2 right-2 p-1.5 bg-slate-900/70 text-white rounded-full hover:bg-slate-900 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={fotoModal}
+              alt="Comprobante de empaque"
+              className="w-full max-h-[80vh] object-contain rounded-xl"
+            />
           </div>
         </div>
       )}
